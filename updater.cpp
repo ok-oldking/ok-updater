@@ -7,6 +7,8 @@
 #include <thread>
 #include <chrono>
 #include <filesystem>
+#include <locale>
+#include <codecvt>
 
 namespace fs = std::filesystem;
 
@@ -85,9 +87,12 @@ void DisplayLogWindow() {
     }
 }
 
-void LogMessage(const std::string& message) {
+void LogMessage(const std::wstring& message) {
+    // Print the log message to the console
+    std::wcout << message << std::endl;
+
     // Update the global logMessages variable
-    logMessages += std::wstring(message.begin(), message.end()) + L"\n";
+    logMessages += message + L"\n";
 
     // Invalidate the window to trigger a repaint
     HWND hwnd = FindWindow(L"LogWindowClass", L"OK Updater");
@@ -96,13 +101,12 @@ void LogMessage(const std::string& message) {
     }
 }
 
-void LogError(const std::string& message) {
+void LogError(const std::wstring& message) {
     // Prefix the message with "Error:"
-    std::string errorMessage = "Error: " + message;
-    std::wstring wErrorMessage = std::wstring(errorMessage.begin(), errorMessage.end()) + L"\n";
+    std::wstring errorMessage = L"Error: " + message + L"\n";
 
     // Update the global logMessages variable
-    logMessages += wErrorMessage;
+    logMessages += errorMessage;
 
     // Invalidate the window to trigger a repaint
     HWND hwnd = FindWindow(L"LogWindowClass", L"OK Updater");
@@ -117,10 +121,10 @@ void CheckAndTerminatePIDs(const std::vector<int>& pids, int checkDuration) {
         bool isRunning = true;
 
         while (elapsedTime < checkDuration) {
-            LogMessage("Waiting for PID " + std::to_string(pid) + " to exit...");
+            LogMessage(L"Waiting for PID " + std::to_wstring(pid) + L" to exit...");
             HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
             if (hProcess == NULL) {
-                LogMessage("PID " + std::to_string(pid) + " has exited.");
+                LogMessage(L"PID " + std::to_wstring(pid) + L" has exited.");
                 isRunning = false;
                 break;
             }
@@ -130,78 +134,92 @@ void CheckAndTerminatePIDs(const std::vector<int>& pids, int checkDuration) {
         }
 
         if (isRunning) {
-            LogMessage("PID " + std::to_string(pid) + " is still running after " + std::to_string(checkDuration) + " seconds, killing it...");
+            LogMessage(L"PID " + std::to_wstring(pid) + L" is still running after " + std::to_wstring(checkDuration) + L" seconds, killing it...");
             HANDLE hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
             if (hProcess != NULL) {
                 TerminateProcess(hProcess, 1);
                 CloseHandle(hProcess);
-                LogMessage("PID " + std::to_string(pid) + " has been terminated.");
+                LogMessage(L"PID " + std::to_wstring(pid) + L" has been terminated.");
             }
             else {
-                LogMessage("Failed to open process for PID " + std::to_string(pid));
+                LogMessage(L"Failed to open process for PID " + std::to_wstring(pid));
             }
         }
     }
 }
 
-void DeleteAndCopyDirectory(const std::string& sourceDir, const std::string& targetDir) {
+void DeleteAndCopyDirectory(const std::wstring& sourceDir, const std::wstring& targetDir) {
     try {
         for (const auto& entry : fs::directory_iterator(sourceDir)) {
             fs::path targetPath = fs::path(targetDir) / entry.path().filename();
             if (fs::exists(targetPath)) {
                 fs::remove_all(targetPath);
-                LogMessage("Deleted: " + targetPath.string());
+                LogMessage(L"Deleted: " + targetPath.wstring());
             }
             fs::copy(entry.path(), targetPath, fs::copy_options::recursive);
-            LogMessage("Copied: " + entry.path().string() + " to " + targetPath.string());
+            LogMessage(L"Copied: " + entry.path().wstring() + L" to " + targetPath.wstring());
         }
     }
     catch (const fs::filesystem_error& e) {
-        LogMessage("Filesystem error: " + std::string(e.what()));
+        LogMessage(L"Filesystem error: " + std::wstring(e.what(), e.what() + strlen(e.what())));
+    }
+    catch (const std::system_error& e) {
+        LogMessage(L"System error: " + std::wstring(e.what(), e.what() + strlen(e.what())) + L" Code: " + std::to_wstring(e.code().value()));
+    }
+    catch (const std::exception& e) {
+        LogMessage(L"Exception: " + std::wstring(e.what(), e.what() + strlen(e.what())));
     }
 }
 
-void ExecuteBatchLogic(const std::string& sourceDir, const std::string& targetDir, const std::string& exe, const std::vector<int>& pids) {
+void ExecuteBatchLogic(const std::wstring& sourceDir, const std::wstring& targetDir, const std::wstring& exe, const std::vector<int>& pids) {
     if (sourceDir.empty()) {
-        LogError("Source directory is not defined.");
+        LogError(L"Source directory is not defined.");
         return;
     }
 
     if (targetDir.empty()) {
-        LogError("Target directory is not defined.");
+        LogError(L"Target directory is not defined.");
         return;
     }
 
     if (pids.empty()) {
-        LogError("pid_list is not defined.");
+        LogError(L"pid_list is not defined.");
         return;
     }
 
     if (exe.empty()) {
-        LogError("exe is not defined.");
+        LogError(L"exe is not defined.");
         return;
     }
 
-    LogMessage("Source directory: " + sourceDir);
-    LogMessage("Target directory: " + targetDir);
-    LogMessage("Executable: " + exe);
+    LogMessage(L"Source directory: " + sourceDir);
+    LogMessage(L"Target directory: " + targetDir);
+    LogMessage(L"Executable: " + exe);
 
     CheckAndTerminatePIDs(pids, 10);
 
     DeleteAndCopyDirectory(sourceDir, targetDir);
 
-    LogMessage("Update Done");
+    LogMessage(L"Update Done");
 }
 
-std::vector<int> parsePids(const std::string& pidsStr) {
+std::vector<int> parsePids(const std::wstring& pidsStr) {
     std::vector<int> pids;
-    std::stringstream ss(pidsStr);
-    std::string pid;
-    while (std::getline(ss, pid, ',')) {
+    std::wstringstream ss(pidsStr);
+    std::wstring pid;
+    while (std::getline(ss, pid, L',')) {
         pids.push_back(std::stoi(pid));
     }
     return pids;
 }
+
+std::wstring ConvertToWString(const std::string& str) {
+    int size_needed = MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), NULL, 0);
+    std::wstring wstrTo(size_needed, 0);
+    MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), &wstrTo[0], size_needed);
+    return wstrTo;
+}
+
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     std::thread logWindowThread(DisplayLogWindow);
@@ -215,10 +233,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     std::string sourceDir = param1;
     std::string targetDir = param2;
     std::string exe = param3;
-    std::vector<int> pids = parsePids(param4);
+    std::vector<int> pids = parsePids(ConvertToWString(param4));
 
-    ExecuteBatchLogic(sourceDir, targetDir, exe, pids);
+    ExecuteBatchLogic(ConvertToWString(sourceDir), ConvertToWString(targetDir), ConvertToWString(exe), pids);
 
     logWindowThread.join();
     return 0;
 }
+
